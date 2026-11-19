@@ -53,7 +53,8 @@ output/
 ├── README.md              # AI 使用说明和图层详情
 ├── layout.json            # 结构化布局数据
 ├── preview.png            # 完整预览图
-├── layer_*.png            # 原始图层图片
+├── layer_sources/         # 原始图层图片
+│   └── layer_*.png
 └── thumb/                 # 缩略图目录（适合 AI 读取）
     ├── preview.png
     └── layer_*.png
@@ -77,7 +78,7 @@ output/
       "position": { "left": 345, "top": 1684 },
       "size": { "width": 373, "height": 137 },
       "bounds": { "left": 345, "top": 1684, "right": 718, "bottom": 1821 },
-      "image": "layer_0_button.png",
+      "image": "layer_sources/layer_0_button.png",
       "thumbnail": "thumb/layer_0_button.png"
     },
     {

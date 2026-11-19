@@ -40,7 +40,8 @@ PSD2AI v${packageJson.version}
   ├── README.md              # AI 使用说明
   ├── layout.json            # 布局数据
   ├── preview.png            # 完整预览图
-  ├── layer_*.png            # 原始图层
+  ├── layer_sources/         # 原始图层
+  │   └── layer_*.png
   └── thumb/                 # 缩略图（适合 AI 读取）
 
 更多信息: https://github.com/citizenll/psd2ai

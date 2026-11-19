@@ -163,7 +163,7 @@ function extractLayerName(name) {
 /**
  * 提取图层信息为 JSON 对象
  */
-async function layerToJSON(node, outputDir, index, usedNames = new Map()) {
+async function layerToJSON(node, imageDir, index, usedNames = new Map()) {
   if (!node || !node.layer) return null;
 
   const layer = node.layer;
@@ -218,10 +218,10 @@ async function layerToJSON(node, outputDir, index, usedNames = new Map()) {
         usedNames.set(cleanName, 0);
       }
 
-      const imagePath = join(outputDir, imageName);
+      const imagePath = join(imageDir, imageName);
       // saveAsPng 是异步写入，必须 await，否则后续读取会拿到不完整的空文件
       await node.layer.image.saveAsPng(imagePath);
-      layerData.image = imageName;
+      layerData.image = `layer_sources/${imageName}`;
       layerData.thumbnail = `thumb/${imageName}`;
 
       console.log(`  导出图层: ${layer.name} -> ${imageName}`);
@@ -233,7 +233,7 @@ async function layerToJSON(node, outputDir, index, usedNames = new Map()) {
   // 处理子图层（组）
   if (node.children && node.children().length > 0) {
     const childrenPromises = node.children()
-      .map((child, i) => layerToJSON(child, outputDir, `${index}_${i}`, usedNames));
+      .map((child, i) => layerToJSON(child, imageDir, `${index}_${i}`, usedNames));
     const childrenResults = await Promise.all(childrenPromises);
     layerData.children = childrenResults.filter(data => data !== null);
 
@@ -312,7 +312,8 @@ ${name}/
 ├── thumb/               # 缩略图目录（适合 AI 读取，最大宽度 400px）
 │   ├── preview.png      # 整体预览缩略图
 │   └── layer_*.png      # 各图层缩略图
-└── layer_*.png          # 原始图层图片（完整尺寸）
+└── layer_sources/       # 原始图层图片（完整尺寸）
+    └── layer_*.png
 \`\`\`
 
 ## 设计稿信息
@@ -363,7 +364,7 @@ ${name}/
 查看 \`thumb/\` 目录下的图层缩略图，理解每个元素的视觉内容
 
 ### 4. 完整资源
-如需完整尺寸的图片，使用根目录下的 \`layer_*.png\` 和 \`preview.png\`
+如需完整尺寸的图片，使用 \`layer_sources/\` 目录下的 \`layer_*.png\` 和根目录下的 \`preview.png\`
 
 ## 为什么使用缩略图？
 
@@ -404,6 +405,12 @@ async function psdToJSON(psdPath, outputDir) {
     mkdirSync(thumbDir, { recursive: true });
   }
 
+  // 创建图层原图目录
+  const layerSourcesDir = join(outputDir, 'layer_sources');
+  if (!existsSync(layerSourcesDir)) {
+    mkdirSync(layerSourcesDir, { recursive: true });
+  }
+
   // 读取 PSD 文件
   const psd = await PSD.open(psdPath);
   const tree = psd.tree();
@@ -417,7 +424,7 @@ async function psdToJSON(psdPath, outputDir) {
 
   // 提取图层信息
   const layerPromises = tree.children()
-    .map((node, i) => layerToJSON(node, outputDir, i, usedNames));
+    .map((node, i) => layerToJSON(node, layerSourcesDir, i, usedNames));
   const layerResults = await Promise.all(layerPromises);
   const layers = layerResults.filter(data => data !== null);
 
@@ -459,7 +466,7 @@ async function psdToJSON(psdPath, outputDir) {
 
   for (const layer of imageLayers) {
     const imagePath = join(outputDir, layer.image);
-    const thumbPath = join(thumbDir, layer.image);
+    const thumbPath = join(thumbDir, basename(layer.image));
     if (existsSync(imagePath)) {
       thumbTasks.push(createThumbnail(imagePath, thumbPath));
     }
