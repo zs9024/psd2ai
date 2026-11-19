@@ -226,7 +226,7 @@ async function layerToJSON(node, imageDir, index, exportState) {
             !style?.Tracking && !style?.BaselineShift &&
             !style?.Strikethrough && (!warp || warp === 'warpNone') &&
             (style?.HorizontalScale ?? 1) === 1 && (style?.VerticalScale ?? 1) === 1 &&
-            !/[\\r\\n]/.test(text.textValue.trim()) &&
+            !/[\r\n]/.test(text.textValue.trim()) &&
             transform?.xx === 1 && transform?.yy === 1 &&
             transform?.xy === 0 && transform?.yx === 0
         });
