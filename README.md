@@ -62,6 +62,8 @@ output/
 
 ### layout.json 示例
 
+每个导出的组和图层都有文档内唯一的 `id`。PSD 内有可用的原生图层 ID 时，使用 `psd_<原生 ID>`。原生 ID 缺失或重复时，使用 `layer_<源图层树中的索引路径>`。索引路径随图层顺序和分组变化。用 `id` 引用节点，用 `image` 和 `thumbnail` 定位图片。
+
 ```json
 {
   "name": "设计稿名称",
@@ -71,6 +73,7 @@ output/
   },
   "layers": [
     {
+      "id": "psd_41",
       "name": "按钮",
       "type": "layer",
       "visible": true,
@@ -82,6 +85,7 @@ output/
       "thumbnail": "thumb/layer_0_button.png"
     },
     {
+      "id": "layer_1",
       "name": "标题文本",
       "type": "text",
       "position": { "left": 100, "top": 50 },

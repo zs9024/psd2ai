@@ -163,7 +163,7 @@ function extractLayerName(name) {
 /**
  * 提取图层信息为 JSON 对象
  */
-async function layerToJSON(node, imageDir, index, usedNames = new Map()) {
+async function layerToJSON(node, imageDir, index, exportState) {
   if (!node || !node.layer) return null;
 
   const layer = node.layer;
@@ -176,7 +176,22 @@ async function layerToJSON(node, imageDir, index, usedNames = new Map()) {
   const width = layer.width;
   const height = layer.height;
 
+  // The parser only creates the lyid value after this lazy block is loaded.
+  const layerId = layer.layerId?.();
+  layerId?.load();
+  const nativeId = layerId?.obj.id;
+  let id = `layer_${index}`;
+  if (Number.isInteger(nativeId)) {
+    // PSD stores lyid as an unsigned 32-bit value.
+    const candidate = `psd_${nativeId >>> 0}`;
+    if (!exportState.layerIds.has(candidate)) {
+      exportState.layerIds.add(candidate);
+      id = candidate;
+    }
+  }
+
   const layerData = {
+    id,
     name: extractLayerName(layer.name),
     type: node.isGroup() ? 'group' : 'layer',
     visible: layer.visible,
@@ -206,17 +221,14 @@ async function layerToJSON(node, imageDir, index, usedNames = new Map()) {
   // 导出图层图片（只导出可见的非文本图层）
   if (!node.isGroup() && layerData.type !== 'text' && width > 0 && height > 0) {
     try {
-      const cleanName = extractLayerName(layer.name);
-
-      // 处理重名：如果名称已存在，添加序号
+      const cleanName = layerData.name || id;
       let imageName = `${cleanName}.png`;
-      if (usedNames.has(cleanName)) {
-        const count = usedNames.get(cleanName) + 1;
-        usedNames.set(cleanName, count);
-        imageName = `${cleanName}_${count}.png`;
-      } else {
-        usedNames.set(cleanName, 0);
+      let suffix = 1;
+      // Reserve the full path before writing so concurrent exports cannot overwrite it.
+      while (exportState.imageNames.has(imageName.toLowerCase())) {
+        imageName = `${cleanName}_${suffix++}.png`;
       }
+      exportState.imageNames.add(imageName.toLowerCase());
 
       const imagePath = join(imageDir, imageName);
       // saveAsPng 是异步写入，必须 await，否则后续读取会拿到不完整的空文件
@@ -233,7 +245,7 @@ async function layerToJSON(node, imageDir, index, usedNames = new Map()) {
   // 处理子图层（组）
   if (node.children && node.children().length > 0) {
     const childrenPromises = node.children()
-      .map((child, i) => layerToJSON(child, imageDir, `${index}_${i}`, usedNames));
+      .map((child, i) => layerToJSON(child, imageDir, `${index}_${i}`, exportState));
     const childrenResults = await Promise.all(childrenPromises);
     layerData.children = childrenResults.filter(data => data !== null);
 
@@ -419,12 +431,14 @@ async function psdToJSON(psdPath, outputDir) {
   console.log(`图层数量: ${tree.children().length}`);
   console.log(`\n开始导出图层...`);
 
-  // 用于跟踪已使用的文件名
-  const usedNames = new Map();
+  const exportState = {
+    layerIds: new Set(),
+    imageNames: new Set(['preview.png'])
+  };
 
   // 提取图层信息
   const layerPromises = tree.children()
-    .map((node, i) => layerToJSON(node, layerSourcesDir, i, usedNames));
+    .map((node, i) => layerToJSON(node, layerSourcesDir, i, exportState));
   const layerResults = await Promise.all(layerPromises);
   const layers = layerResults.filter(data => data !== null);
 
