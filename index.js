@@ -207,19 +207,37 @@ async function layerToJSON(node, imageDir, index, exportState) {
       const text = layer.typeTool();
       if (text && text.textValue) {
         layerData.type = 'text';
-        layerData.text = {
-          content: text.textValue,
-          fontSize: text.sizes?.[0] || 14,
-          color: text.colors?.[0] || [0, 0, 0, 255]
-        };
+        layerData.text = { content: text.textValue };
+        const engine = text.engineData?.EngineDict;
+        const runs = engine?.StyleRun?.RunArray;
+        const style = runs?.[0]?.StyleSheet?.StyleSheetData;
+        const alignment = text.alignment()?.[0];
+        const transform = text.transform;
+        const warp = text.warpData?.warpStyle?.value;
+        Object.assign(layerData.text, {
+          font: text.fonts()?.[style?.Font],
+          fontSize: text.sizes()?.[0],
+          color: text.colors()?.[0],
+          alignment,
+          simpleStyle: runs?.length === 1 &&
+            engine.ParagraphRun?.RunArray?.length === 1 &&
+            ['left', 'center', 'right'].includes(alignment) &&
+            !style?.FauxBold && !style?.FauxItalic && !style?.Underline &&
+            !style?.Tracking && !style?.BaselineShift &&
+            !style?.Strikethrough && (!warp || warp === 'warpNone') &&
+            (style?.HorizontalScale ?? 1) === 1 && (style?.VerticalScale ?? 1) === 1 &&
+            !/[\\r\\n]/.test(text.textValue.trim()) &&
+            transform?.xx === 1 && transform?.yy === 1 &&
+            transform?.xy === 0 && transform?.yx === 0
+        });
       }
     } catch (e) {
       // 忽略文本提取错误
     }
   }
 
-  // 导出图层图片（只导出可见的非文本图层）
-  if (!node.isGroup() && layerData.type !== 'text' && width > 0 && height > 0) {
+  // Editable text can also carry rendered pixels for the static fallback.
+  if (!node.isGroup() && width > 0 && height > 0) {
     try {
       const cleanName = layerData.name || id;
       let imageName = `${cleanName}.png`;
