@@ -1,7 +1,7 @@
 import { writeFileSync, mkdirSync, existsSync, readFileSync } from 'fs';
 import { join, dirname, basename } from 'path';
 import sharp from 'sharp';
-import { readLayerEffects, renderTextEffects } from './text-effects.js';
+import { labelEffects, readLayerEffects, renderTextEffects } from './text-effects.js';
 import { groupStroke, openPsdWithGroups } from './group-strokes.js';
 
 async function exportLayerImage(layer, layerData, imagePath, inheritedStroke) {
@@ -9,7 +9,7 @@ async function exportLayerImage(layer, layerData, imagePath, inheritedStroke) {
     try {
       const effects = inheritedStroke ? [inheritedStroke] : readLayerEffects(layer);
       if (effects.length > 0) {
-        if (layerData.text) layerData.text.simpleStyle = false;
+        if (layerData.text) Object.assign(layerData.text, { simpleStyle: false, ...labelEffects(effects) });
         const result = await renderTextEffects(layer.image.toPng(), effects);
         for (const warning of result.warnings) {
           console.warn(`  图层样式 ${layerData.id} ${layer.name}: ${warning}`);
@@ -193,7 +193,7 @@ function extractLayerName(name) {
 /**
  * 提取图层信息为 JSON 对象
  */
-async function layerToJSON(node, imageDir, index, exportState, inheritedStroke) {
+async function layerToJSON(node, imageDir, index, exportState, inheritedStroke, groupNotes = []) {
   if (!node || !node.layer) return null;
 
   const layer = node.layer;
@@ -237,13 +237,30 @@ async function layerToJSON(node, imageDir, index, exportState, inheritedStroke) 
       const text = layer.typeTool();
       if (text && text.textValue) {
         layerData.type = 'text';
-        layerData.text = { content: text.textValue };
+        layerData.text = { content: text.textValue, bounds: { ...layerData.bounds } };
+        if (groupNotes.length) layerData.text.groupNotes = groupNotes;
         const engine = text.engineData?.EngineDict;
         const runs = engine?.StyleRun?.RunArray;
         const style = runs?.[0]?.StyleSheet?.StyleSheetData;
         const alignment = text.alignment()?.[0];
         const transform = text.transform;
         const warp = text.warpData?.warpStyle?.value;
+        const keys = ['xx', 'xy', 'yx', 'yy'];
+        if (keys.every(key => Number.isFinite(transform?.[key]))) {
+          layerData.text.transform = Object.fromEntries(keys.map(key => [key, transform[key]]));
+        }
+        const styleKeys = ['Font', 'FontSize', 'FillColor', 'FauxBold', 'FauxItalic', 'Underline',
+          'Tracking', 'BaselineShift', 'Strikethrough', 'HorizontalScale', 'VerticalScale'];
+        const signature = run => JSON.stringify(styleKeys.map(key => run?.StyleSheet?.StyleSheetData?.[key]));
+        const textNotes = [];
+        if (Array.isArray(runs) && runs.some(run => signature(run) !== signature(runs[0]))) {
+          textNotes.push('混合文字样式使用首段样式近似');
+        }
+        if (style?.FauxBold || style?.FauxItalic || style?.Underline || style?.Strikethrough ||
+            style?.Tracking || style?.BaselineShift || (style?.HorizontalScale ?? 1) !== 1 ||
+            (style?.VerticalScale ?? 1) !== 1) textNotes.push('字形修饰或字距使用基础文字样式近似');
+        if (warp && warp !== 'warpNone') textNotes.push('已省略文字变形');
+        if (textNotes.length) layerData.text.styleNotes = textNotes;
         Object.assign(layerData.text, {
           font: text.fonts()?.[style?.Font],
           fontSize: text.sizes()?.[0],
@@ -292,17 +309,22 @@ async function layerToJSON(node, imageDir, index, exportState, inheritedStroke) 
   // 处理子图层（组）
   if (node.children && node.children().length > 0) {
     let stroke = inheritedStroke;
+    let notes = groupNotes;
     if (!stroke && node.isGroup()) {
       try {
         const { effect, reason } = groupStroke(node);
         stroke = effect;
-        if (reason) console.warn(`  图层组样式 ${id} ${layer.name}: ${reason}，按原图层导出`);
+        if (reason) {
+          console.warn(`  图层组样式 ${id} ${layer.name}: ${reason}，按原图层导出`);
+          notes = [...notes, `已省略组「${layer.name}」的效果，${reason}`];
+        }
       } catch (error) {
         console.warn(`  图层组样式 ${id} ${layer.name}: 读取失败，按原图层导出 (${error.message})`);
+        notes = [...notes, `未能读取组「${layer.name}」的效果`];
       }
     }
     const childrenPromises = node.children()
-      .map((child, i) => layerToJSON(child, imageDir, `${index}_${i}`, exportState, stroke));
+      .map((child, i) => layerToJSON(child, imageDir, `${index}_${i}`, exportState, stroke, notes));
     const childrenResults = await Promise.all(childrenPromises);
     layerData.children = childrenResults.filter(data => data !== null);
 

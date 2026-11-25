@@ -77,10 +77,10 @@ function prepareEffects(effects, warnings) {
       const sigma = (size - spread) / 2;
       const distance = type === 'DrSh' ? Math.max(0, unit(settings, 'Dstn', 0) * scale) : 0;
       const angle = unit(settings, 'lagl', 120) * Math.PI / 180;
-      const dx = Math.round(-distance * Math.cos(angle));
-      const dy = Math.round(distance * Math.sin(angle));
+      const offset = [-distance * Math.cos(angle), distance * Math.sin(angle)];
+      const [dx, dy] = offset.map(Math.round);
       const extent = spread + 3 * sigma;
-      prepared.push({ type, color, opacity, spread, sigma, dx, dy, extent });
+      prepared.push({ type, color, opacity, size, spread, sigma, dx, dy, offset, extent });
     }
   }
   return prepared;
@@ -90,6 +90,39 @@ export function outsideStrokeRadius(effect) {
   if (effect.type !== 'FrFX') return null;
   const [stroke] = prepareEffects([effect], []);
   return stroke?.inside === 0 ? stroke.outside : null;
+}
+
+export function labelEffects(effects) {
+  const result = {};
+  const notes = [];
+  for (const effect of effects) {
+    const { type, settings } = effect;
+    if (type !== 'FrFX' && type !== 'DrSh') {
+      notes.push(`已省略 ${effectNames[type] ?? type}，可编辑文本只还原纯色外描边和投影`);
+      continue;
+    }
+    const [style] = prepareEffects([effect], notes);
+    if (!style) continue;
+    const color = [...style.color, Math.round(style.opacity * 255)];
+    if (type === 'FrFX') {
+      if (style.inside) notes.push('已省略内描边或居中描边');
+      else if (result.outline) notes.push('已省略额外的描边，保留第一层可还原的纯色外描边');
+      else result.outline = { width: style.outside, color };
+    } else if (result.shadow) {
+      notes.push('已省略额外的投影，保留第一层可还原的投影');
+    } else if (style.size || style.offset.some(value => value !== 0)) {
+      result.shadow = { color, offset: style.offset, blur: style.size };
+      if (style.size) notes.push('投影羽化使用原生文本模糊近似');
+      if (style.spread) notes.push('已省略投影的扩展');
+      if (settings.uglg) notes.push(Number.isFinite(settings.lagl?.value)
+        ? '投影角度使用效果记录中的全局光角度'
+        : '未找到投影角度，使用默认角度');
+    } else {
+      notes.push('已省略零模糊且无偏移的投影');
+    }
+  }
+  if (notes.length) result.effectNotes = [...new Set(notes)];
+  return result;
 }
 
 function over(data, offset, r, g, b, sourceAlpha) {

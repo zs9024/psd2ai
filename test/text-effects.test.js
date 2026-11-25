@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import sharp from 'sharp';
-import { enabledTextEffects, renderTextEffects } from '../text-effects.js';
+import { enabledTextEffects, labelEffects, renderTextEffects } from '../text-effects.js';
 
 const unit = value => ({ value });
 const color = (r, g, b) => ({ 'Rd  ': r, 'Grn ': g, 'Bl  ': b });
@@ -70,4 +70,23 @@ test('disabled descriptors are ignored and unsupported active effects are report
   assert.equal(result.png, undefined);
   assert.equal(result.warnings.length, 1);
   assert.match(result.warnings[0], /GrFl/);
+});
+
+test('editable labels normalize one outside outline and one shadow and report omitted effects', () => {
+  const effects = enabledTextEffects({
+    'Scl ': unit(50),
+    frameFXMulti: [stroke('InsF', 6), stroke('OutF', 10), stroke('OutF', 16)],
+    DrSh: { enab: true, Dstn: unit(8), lagl: unit(90), blur: unit(6), Opct: unit(50),
+      Ckmt: unit(25), 'Md  ': unit('Mltp'), 'Clr ': color(32, 48, 64) },
+    GrFl: { enab: true },
+  });
+  const data = labelEffects(effects);
+  assert.deepEqual(data.outline, { width: 5, color: [173, 77, 58, 255] });
+  assert.equal(data.shadow.blur, 3);
+  assert.ok(Math.abs(data.shadow.offset[0]) < 1e-9);
+  assert.deepEqual(data.shadow.offset.slice(1), [4]);
+  assert.deepEqual(data.shadow.color, [32, 48, 64, 128]);
+  for (const note of ['内描边', '额外的描边', 'Mltp', '扩展', 'GrFl']) {
+    assert.ok(data.effectNotes.some(message => message.includes(note)));
+  }
 });
