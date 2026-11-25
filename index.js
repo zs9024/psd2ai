@@ -1,7 +1,37 @@
-import PSD from 'psd';
 import { writeFileSync, mkdirSync, existsSync, readFileSync } from 'fs';
 import { join, dirname, basename } from 'path';
 import sharp from 'sharp';
+import { readLayerEffects, renderTextEffects } from './text-effects.js';
+import { groupStroke, openPsdWithGroups } from './group-strokes.js';
+
+async function exportLayerImage(layer, layerData, imagePath, inheritedStroke) {
+  if (layerData.text || inheritedStroke) {
+    try {
+      const effects = inheritedStroke ? [inheritedStroke] : readLayerEffects(layer);
+      if (effects.length > 0) {
+        if (layerData.text) layerData.text.simpleStyle = false;
+        const result = await renderTextEffects(layer.image.toPng(), effects);
+        for (const warning of result.warnings) {
+          console.warn(`  图层样式 ${layerData.id} ${layer.name}: ${warning}`);
+        }
+        if (result.png) {
+          writeFileSync(imagePath, result.png);
+          const left = layer.left + result.dx;
+          const top = layer.top + result.dy;
+          const { width, height } = result;
+          layerData.position = { left, top };
+          layerData.size = { width, height };
+          layerData.bounds = { left, top, right: left + width, bottom: top + height };
+          return;
+        }
+      }
+    } catch (error) {
+      if (layerData.text) layerData.text.simpleStyle = false;
+      console.warn(`  图层样式 ${layerData.id} ${layer.name}: 合成失败，导出原图层像素 (${error.message})`);
+    }
+  }
+  await layer.image.saveAsPng(imagePath);
+}
 
 /**
  * 生成缩略图
@@ -163,7 +193,7 @@ function extractLayerName(name) {
 /**
  * 提取图层信息为 JSON 对象
  */
-async function layerToJSON(node, imageDir, index, exportState) {
+async function layerToJSON(node, imageDir, index, exportState, inheritedStroke) {
   if (!node || !node.layer) return null;
 
   const layer = node.layer;
@@ -249,8 +279,7 @@ async function layerToJSON(node, imageDir, index, exportState) {
       exportState.imageNames.add(imageName.toLowerCase());
 
       const imagePath = join(imageDir, imageName);
-      // saveAsPng 是异步写入，必须 await，否则后续读取会拿到不完整的空文件
-      await node.layer.image.saveAsPng(imagePath);
+      await exportLayerImage(layer, layerData, imagePath, inheritedStroke);
       layerData.image = `layer_sources/${imageName}`;
       layerData.thumbnail = `thumb/${imageName}`;
 
@@ -262,8 +291,18 @@ async function layerToJSON(node, imageDir, index, exportState) {
 
   // 处理子图层（组）
   if (node.children && node.children().length > 0) {
+    let stroke = inheritedStroke;
+    if (!stroke && node.isGroup()) {
+      try {
+        const { effect, reason } = groupStroke(node);
+        stroke = effect;
+        if (reason) console.warn(`  图层组样式 ${id} ${layer.name}: ${reason}，按原图层导出`);
+      } catch (error) {
+        console.warn(`  图层组样式 ${id} ${layer.name}: 读取失败，按原图层导出 (${error.message})`);
+      }
+    }
     const childrenPromises = node.children()
-      .map((child, i) => layerToJSON(child, imageDir, `${index}_${i}`, exportState));
+      .map((child, i) => layerToJSON(child, imageDir, `${index}_${i}`, exportState, stroke));
     const childrenResults = await Promise.all(childrenPromises);
     layerData.children = childrenResults.filter(data => data !== null);
 
@@ -442,8 +481,7 @@ async function psdToJSON(psdPath, outputDir) {
   }
 
   // 读取 PSD 文件
-  const psd = await PSD.open(psdPath);
-  const tree = psd.tree();
+  const { psd, tree } = await openPsdWithGroups(psdPath);
 
   console.log(`PSD 尺寸: ${psd.header.width}x${psd.header.height}`);
   console.log(`图层数量: ${tree.children().length}`);
